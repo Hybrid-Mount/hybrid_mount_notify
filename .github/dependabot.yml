@@ -9,13 +9,3 @@ updates:
       crates:
         patterns:
           - "*"
-
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "monthly"
-    target-branch: "main"
-    groups:
-      crates:
-        patterns:
-          - "*"
