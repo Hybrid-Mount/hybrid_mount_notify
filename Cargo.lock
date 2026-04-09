@@ -716,7 +716,6 @@ name = "notify"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "serde_json",
  "tgbot",
  "tokio",
 ]
