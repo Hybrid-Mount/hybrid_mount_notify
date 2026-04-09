@@ -1,0 +1,19 @@
+# Copyright 2025 Hybrid Mount Authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "notify"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+serde_json = "1.0.149"
+tgbot = "0.44.0"
+tokio = { version = "1.51.1", features = ["full"] }
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
