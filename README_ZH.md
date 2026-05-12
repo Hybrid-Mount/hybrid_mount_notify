@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square)
 
 Hybrid Mount Notify 是 Hybrid Mount 构建与发布流程使用的 Telegram 通知工具。
-它会扫描 `output/` 中生成的产物，读取当前代码仓库的 Git 元数据，再把压缩包发送到指定 Telegram 聊天或话题。
+它会扫描 `output/` 中生成的 ZIP 产物，读取当前代码仓库的 Git 元数据，再把每个压缩包发送到指定 Telegram 聊天或话题。
 
 这个仓库同时保留两种使用方式：
 
@@ -46,9 +46,9 @@ Hybrid Mount Notify 是 Hybrid Mount 构建与发布流程使用的 Telegram 通
 运行时主要流程如下：
 
 1. 从环境变量读取 Telegram 凭据
-2. 在 `output/` 中查找第一个 `.zip` 产物
+2. 在 `output/` 中查找所有 `.zip` 产物
 3. 从 Git / CI 环境解析分支与提交信息
-4. 以 HTML caption 的形式把压缩包发送到 Telegram
+4. 以 HTML caption 的形式把每个压缩包发送到 Telegram
 
 ## 仓库结构
 
@@ -96,7 +96,7 @@ notify
 notify 37 "Daily Tilling - v3.4.5-123"
 ```
 
-CLI 默认要求当前工作目录下存在 `output/` 目录，并且其中至少有一个 `.zip` 产物。
+CLI 默认要求当前工作目录下存在 `output/` 目录，并且其中至少有一个 `.zip` 产物。如果目录里有多个 ZIP，会按排序后的顺序全部发送。
 
 ## 库集成方式
 

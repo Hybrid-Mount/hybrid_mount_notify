@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
-    env, fs,
+    env,
+    ffi::OsStr,
+    fs,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -66,63 +68,150 @@ async fn send_output_dir_notification_async(request: &NotifyRequest) -> Result<(
         env::var("GITHUB_SERVER_URL").unwrap_or_else(|_| "https://github.com".to_string());
     let branch_name = env::var("GITHUB_REF_NAME").unwrap_or_else(|_| get_git_branch());
 
-    let file_path = find_first_zip(&request.output_dir)?;
-    let file_name = file_path
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-    let file_size =
-        fs::metadata(&file_path).map(|meta| meta.len()).unwrap_or(0) as f64 / 1024.0 / 1024.0;
-
-    println!("Selecting yield: {} ({:.2} MB)", file_name, file_size);
+    let artifacts = find_zip_files(&request.output_dir)?;
+    let total_size = artifacts.iter().map(|artifact| artifact.size_bytes).sum();
 
     let (commit_msg, commit_hash) = get_git_commit();
     let safe_commit_msg = escape_html(&commit_msg);
     let commit_link = format!("{}/{}/commit/{}", server_url, repo, commit_hash);
 
-    let caption = format!(
-        "🌾 <b>Hybrid-Mount: {}</b>\n\n\
-        🌿 <b>分支 (Branch):</b> {}\n\n\
-        ⚖️ <b>重量 (Weight):</b> {:.2} MB\n\n\
-        📝 <b>新性状 (Commit):</b>\n\
-        <pre>{}</pre>\n\n\
-        🚜 <a href='{}'>查看日志 (View Log)</a>",
-        request.event_label, branch_name, file_size, safe_commit_msg, commit_link
+    println!(
+        "Selecting {} yield(s), total {:.2} MB",
+        artifacts.len(),
+        bytes_to_mib(total_size)
     );
 
-    println!("Dispatching yield to Granary (Telegram)...");
-
     let bot = Client::new(bot_token)?;
-    let mut action = SendDocument::new(chat_id, InputFile::path(file_path).await?)
+    for (index, artifact) in artifacts.iter().enumerate() {
+        println!(
+            "Dispatching yield to Granary (Telegram): {} ({:.2} MB)",
+            artifact.file_name,
+            bytes_to_mib(artifact.size_bytes)
+        );
+
+        let caption = if index == 0 {
+            build_primary_caption(
+                request,
+                &branch_name,
+                artifacts.len(),
+                total_size,
+                &safe_commit_msg,
+                &commit_link,
+            )
+        } else {
+            build_extra_caption(request, index + 1, artifacts.len(), artifact)
+        };
+
+        let mut action = SendDocument::new(
+            chat_id.clone(),
+            InputFile::path(artifact.path.clone()).await?,
+        )
         .with_caption_parse_mode(tgbot::types::ParseMode::Html);
 
-    if let Some(topic_id) = request.topic_id {
-        action = action.with_message_thread_id(topic_id);
-    }
+        if let Some(topic_id) = request.topic_id {
+            action = action.with_message_thread_id(topic_id);
+        }
 
-    let action = if caption.len() < 1024 {
-        action.with_caption(&caption)
-    } else {
-        action.with_caption(commit_link)
-    };
-    bot.execute(action).await?;
+        let action = if caption.len() < 1024 {
+            action.with_caption(&caption)
+        } else {
+            action.with_caption(&commit_link)
+        };
+        bot.execute(action).await?;
+    }
 
     Ok(())
 }
 
-fn find_first_zip(output_dir: &Path) -> Result<PathBuf> {
+#[derive(Debug, Clone)]
+struct Artifact {
+    path: PathBuf,
+    file_name: String,
+    size_bytes: u64,
+}
+
+fn find_zip_files(output_dir: &Path) -> Result<Vec<Artifact>> {
     let entries = fs::read_dir(output_dir)
         .with_context(|| format!("failed to read output directory {}", output_dir.display()))?;
+    let mut artifacts = Vec::new();
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "zip") {
-            return Ok(path);
+        if is_zip_path(&path) {
+            let file_name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let size_bytes = fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+            artifacts.push(Artifact {
+                path,
+                file_name,
+                size_bytes,
+            });
         }
     }
 
-    bail!("no zip files found in {}", output_dir.display())
+    artifacts.sort_by(|a, b| a.file_name.cmp(&b.file_name));
+    if artifacts.is_empty() {
+        bail!("no zip files found in {}", output_dir.display());
+    }
+
+    Ok(artifacts)
+}
+
+fn is_zip_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
+}
+
+fn build_primary_caption(
+    request: &NotifyRequest,
+    branch_name: &str,
+    artifact_count: usize,
+    total_size: u64,
+    safe_commit_msg: &str,
+    commit_link: &str,
+) -> String {
+    format!(
+        "🌾 <b>Hybrid-Mount: {}</b>\n\n\
+        🌿 <b>分支 (Branch):</b> {}\n\n\
+        📦 <b>产物 (Artifacts):</b> {}\n\n\
+        ⚖️ <b>总重 (Total Weight):</b> {:.2} MB\n\n\
+        📝 <b>新性状 (Commit):</b>\n\
+        <pre>{}</pre>\n\n\
+        🚜 <a href='{}'>查看日志 (View Log)</a>",
+        request.event_label,
+        branch_name,
+        artifact_count,
+        bytes_to_mib(total_size),
+        safe_commit_msg,
+        commit_link
+    )
+}
+
+fn build_extra_caption(
+    request: &NotifyRequest,
+    index: usize,
+    artifact_count: usize,
+    artifact: &Artifact,
+) -> String {
+    format!(
+        "🌾 <b>Hybrid-Mount: {}</b>\n\n\
+        📦 <b>产物 (Artifact):</b> {}/{}\n\n\
+        <pre>{}</pre>\n\n\
+        ⚖️ <b>重量 (Weight):</b> {:.2} MB",
+        request.event_label,
+        index,
+        artifact_count,
+        escape_html(&artifact.file_name),
+        bytes_to_mib(artifact.size_bytes)
+    )
+}
+
+fn bytes_to_mib(bytes: u64) -> f64 {
+    bytes as f64 / 1024.0 / 1024.0
 }
 
 fn get_git_commit() -> (String, String) {
@@ -165,4 +254,40 @@ fn escape_html(input: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs::{self, File},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::*;
+
+    #[test]
+    fn find_zip_files_returns_all_zips_sorted() -> Result<()> {
+        let output_dir = make_temp_output_dir()?;
+        File::create(output_dir.join("Hybrid-Mount-lite.zip"))?;
+        File::create(output_dir.join("Hybrid-Mount.zip"))?;
+        File::create(output_dir.join("notes.txt"))?;
+
+        let artifacts = find_zip_files(&output_dir)?;
+        let names: Vec<_> = artifacts
+            .iter()
+            .map(|artifact| artifact.file_name.as_str())
+            .collect();
+
+        assert_eq!(names, vec!["Hybrid-Mount-lite.zip", "Hybrid-Mount.zip"]);
+
+        fs::remove_dir_all(output_dir)?;
+        Ok(())
+    }
+
+    fn make_temp_output_dir() -> Result<PathBuf> {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let output_dir = env::temp_dir().join(format!("notify-test-{nanos}"));
+        fs::create_dir_all(&output_dir)?;
+        Ok(output_dir)
+    }
 }

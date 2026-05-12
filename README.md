@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square)
 
 Hybrid Mount Notify is the Telegram notification helper used by the Hybrid Mount build and release pipeline.
-It scans `output/` for the generated artifact, collects Git metadata from the current checkout, and sends the package to a Telegram chat or topic.
+It scans `output/` for generated ZIP artifacts, collects Git metadata from the current checkout, and sends every package to a Telegram chat or topic.
 
 It is intentionally usable in two ways:
 
@@ -46,9 +46,9 @@ The crate is split into two layers:
 At runtime, the tool:
 
 1. reads Telegram credentials from environment variables
-2. scans `output/` for the first `.zip` artifact
+2. scans `output/` for all `.zip` artifacts
 3. resolves branch and commit metadata from Git / CI environment
-4. uploads the archive to Telegram with an HTML caption
+4. uploads each archive to Telegram with an HTML caption
 
 ## Repository Layout
 
@@ -96,7 +96,7 @@ notify
 notify 37 "Daily Tilling - v3.4.5-123"
 ```
 
-The CLI expects the current working directory to contain an `output/` folder with at least one `.zip` artifact.
+The CLI expects the current working directory to contain an `output/` folder with at least one `.zip` artifact. If multiple ZIP files are present, all of them are sent in sorted order.
 
 ## Library Integration
 
